@@ -6,6 +6,8 @@ Implementation of gpustat
 """
 
 import functools
+import time
+import os
 from typing import (TYPE_CHECKING, Any, Callable, Dict, Iterable, List,
                     Optional, Sequence, Union, cast)
 
@@ -546,6 +548,9 @@ class GPUStatCollection(Sequence[GPUStat]):
             gpu_info['enforced.power.limit'] = power_limit // 1000 if power_limit is not None else None
 
             # Processes
+            if os.environ.get('GPUSTAT_PSUTIL', None) is None:
+                gpu_info['processes'] = None
+                return gpu_info
             nv_comp_processes = safenvml(N.nvmlDeviceGetComputeRunningProcesses)(handle)
             nv_graphics_processes = safenvml(N.nvmlDeviceGetGraphicsRunningProcesses)(handle)
 
@@ -743,6 +748,94 @@ class GPUStatCollection(Sequence[GPUStat]):
                   default=date_handler)
         fp.write(os.linesep)
         fp.flush()
+        
+    def record_chrome_json(self):
+        """
+        收集当前时刻的gpu状态，并按照chrome tracing的格式输出（见下文）
+        其中pid/tid为GPU id，并不是进程id或线程id。
+        [
+    {
+        "name": "used_memory",
+        "args": {
+            "value": 8912896
+        },
+        "pid": 0,
+        "ts": "1714625283631",
+        "cat": "used_memory",
+        "tid": 0,
+        "ph": "C",
+        "id": "0"
+    },
+    {
+        "name": "power_usage",
+        "args": {
+            "value": 83
+        },
+        "pid": 0,
+        "ts": "1714625283631",
+        "cat": "power_usage",
+        "tid": 0,
+        "ph": "C",
+        "id": "0"
+    },
+        """
+        ret = []
+        import time
+        ts = time.time()
+        for gpu_id, gpu in enumerate(self):
+            """
+            dict_keys(['index', 'name', 'uuid', 'temperature.gpu', 'fan.speed', 'memory.used', 'memory.total', 'utilization.gpu', 'utilization.enc', 'utilization.dec', 'power.draw', 'enforced.power.limit', 'processes'])
+            """
+            ret.append({
+                "name": "used_memory",
+                "args": {
+                    "value": gpu["memory.used"],
+                },
+                "pid": gpu_id,
+                "ts": ts,
+                "cat": "used_memory",
+                "tid": gpu_id,
+                "ph": "C",
+                "id": "0"
+            })
+            ret.append({
+                "name": "use_rate",
+                "args": {
+                    "value": gpu["utilization.gpu"],
+                },
+                "pid": gpu_id,
+                "ts": ts,
+                "cat": "use_rate",
+                "tid": gpu_id,
+                "ph": "C",
+                "id": "0"
+            })
+            ret.append({
+                "name": "temperature.gpu",
+                "args": {
+                    "value": gpu["temperature.gpu"],
+                },
+                "pid": gpu_id,
+                "ts": ts,
+                "cat": "temperature.gpu",
+                "tid": gpu_id,
+                "ph": "C",
+                "id": "0"
+            })
+            ret.append({
+                "name": "power_usage",
+                "args": {
+                    "value": gpu["power.draw"],
+                },
+                "pid": gpu_id,
+                "ts": ts,
+                "cat": "power_usage",
+                "tid": gpu_id,
+                "ph": "C",
+                "id": "0"
+            })
+        return ret
+    
 
 
 def new_query() -> GPUStatCollection:

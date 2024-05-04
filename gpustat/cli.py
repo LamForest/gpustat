@@ -54,7 +54,7 @@ def get_complete_for_one_or_zero(input):
     return output
 
 
-def print_gpustat(*, id=None, json=False, debug=False, **kwargs):
+def print_gpustat(*, id=None, json=False, debug=False, JS = None, **kwargs):
     '''Display the GPU query results into standard output.'''
     try:
         gpu_stats = GPUStatCollection.new_query(debug=debug, id=id)
@@ -79,14 +79,22 @@ def print_gpustat(*, id=None, json=False, debug=False, **kwargs):
         sys.exit(1)
 
     if json:
-        gpu_stats.print_json(sys.stdout)
+        if JS is not None:
+            JS.extend(gpu_stats.record_chrome_json())
+            gpu_stats.print_formatted(sys.stdout, **kwargs)
+            print("Will also save json to gpu.json")
+
+        else:
+            gpu_stats.print_json(sys.stdout)
     else:
         gpu_stats.print_formatted(sys.stdout, **kwargs)
 
 
-def loop_gpustat(interval=1.0, **kwargs):
+def loop_gpustat(interval=1.0, json=False,**kwargs):
     term = Terminal()
-
+    JS = None
+    if json:
+        JS = []
     with term.fullscreen():
         while 1:
             try:
@@ -94,7 +102,7 @@ def loop_gpustat(interval=1.0, **kwargs):
 
                 # Move cursor to (0, 0) but do not restore original cursor loc
                 print(term.move(0, 0), end='')
-                print_gpustat(eol_char=term.clear_eol + os.linesep, **kwargs)
+                print_gpustat(eol_char=term.clear_eol + os.linesep, JS = JS,json=json, **kwargs)
                 print(term.clear_eos, end='')
 
                 query_duration = time.time() - query_start
@@ -102,7 +110,16 @@ def loop_gpustat(interval=1.0, **kwargs):
                 if sleep_duration > 0:
                     time.sleep(sleep_duration)
             except KeyboardInterrupt:
+                with open("gpu.json", "w") as f:
+                    import json#避免重名变量
+                    json.dump(JS, f, indent=4)
                 return 0
+            except Exception as e: 
+                with open("gpu.json", "w") as f:
+                    import json#避免重名变量
+                    json.dump(JS, f, indent=4)
+                raise e
+                
 
 
 def main(*argv):
@@ -210,12 +227,13 @@ def main(*argv):
         args.interval = 1.0
     if args.interval > 0:
         args.interval = max(0.1, args.interval)
-        if args.json:
-            sys.stderr.write("Error: --json and --interval/-i "
-                             "can't be used together.\n")
-            sys.exit(1)
+        # 注释掉报错
+        # if args.json:
+        #     sys.stderr.write("Error: --json and --interval/-i "
+        #                      "can't be used together.\n")
+        #     sys.exit(1)
 
-        loop_gpustat(**vars(args))
+        loop_gpustat( **vars(args))
     else:
         del args.interval  # type: ignore
         print_gpustat(**vars(args))
